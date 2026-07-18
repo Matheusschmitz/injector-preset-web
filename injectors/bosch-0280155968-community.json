@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "bosch-0280155968-community",
+  "name": "Bosch 0 280 155 968 — 431 cc/min at 3 bar",
+  "partNumber": "Bosch 0 280 155 968",
+  "source": {
+    "kind": "community",
+    "url": "",
+    "notes": ""
+  },
+  "reference": {
+    "pressureKpa": 300,
+    "flowCcMin": 431
+  },
+  "flowModel": {
+    "kind": "curve",
+    "points": [
+      { "pressureKpa": 250, "flowCcMin": 389 },
+      { "pressureKpa": 300, "flowCcMin": 431 },
+      { "pressureKpa": 350, "flowCcMin": 462 },
+      { "pressureKpa": 400, "flowCcMin": 494 },
+      { "pressureKpa": 450, "flowCcMin": 525 },
+      { "pressureKpa": 500, "flowCcMin": 557 }
+    ]
+  },
+  "deadTime": {
+    "voltageBins": [8, 9, 10, 11, 12, 13, 14, 15, 16],
+    "pressureBinsKpa": [250, 300, 350, 400, 450, 500],
+    "valuesMs": [
+      [1.73, 1.36, 1.07, 0.89, 0.74, 0.60, 0.53, 0.46, 0.35],
+      [1.79, 1.40, 1.11, 0.91, 0.77, 0.62, 0.54, 0.47, 0.37],
+      [1.86, 1.44, 1.15, 0.93, 0.80, 0.64, 0.56, 0.48, 0.38],
+      [1.93, 1.48, 1.18, 0.95, 0.83, 0.66, 0.58, 0.50, 0.39],
+      [1.99, 1.52, 1.22, 0.97, 0.86, 0.68, 0.60, 0.51, 0.40],
+      [2.06, 1.56, 1.26, 0.99, 0.89, 0.70, 0.59, 0.52, 0.42]
+    ]
+  }
+}

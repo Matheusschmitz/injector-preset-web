@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Add injector | Injector Preset Catalog</title>
+    <link rel="stylesheet" href="styles.css?v=2" />
+  </head>
+  <body>
+    <header class="global-header">
+      <div class="header-container">
+        <nav class="site-nav" aria-label="Main navigation">
+          <a href="index.html" class="nav-link">Catalog</a>
+          <a href="add-injector.html" class="nav-link" aria-current="page">Add Injector</a>
+          <a href="https://github.com/Matheusschmitz/injector-preset-web" target="_blank" rel="noopener" class="nav-link">GitHub</a>
+        </nav>
+        <div class="header-banner">
+          Want to help? <a href="add-injector.html">Contribute new injector presets!</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <header>
+        <h1>Add an injector profile</h1>
+        <div class="unit-selectors">
+          <label>Pressure unit<select id="pressure-unit"><option value="kPa">kPa</option><option value="bar">bar</option><option value="psi">psi</option></select></label>
+          <label>Flow unit<select id="flow-unit"><option value="cc/min">cc/min</option><option value="lb/h">lb/h</option><option value="g/s">g/s</option></select></label>
+        </div>
+        <p id="unit-note" class="unit-note"></p>
+        <p>Create one JSON file for one injector. Use official manufacturer documentation whenever possible; user-provided values must be marked as community data.</p>
+      </header>
+
+      <hr />
+      <section aria-labelledby="profile-title">
+        <div><div><p>1. Characterization</p><h2 id="profile-title">Injector and source data</h2></div></div>
+        <form id="editor-form">
+          <div>
+            <label>Profile id<input id="editor-id" required placeholder="bosch-ev14-550" pattern="[a-z0-9-]+" /></label>
+            <label>Display name<input id="editor-name" required placeholder="Bosch EV14 550 cc/min" /></label>
+            <label>Part number<input id="editor-part" placeholder="0 280 ..." /></label>
+            <label>Data source<select id="editor-source"><option value="official">Official manufacturer documentation</option><option value="community">Community / user supplied</option></select></label>
+            <label>Flow input method<select id="editor-flow-mode"><option value="curve">Pressure × flow curve</option><option value="formula">One flow point; use square-root formula</option></select></label>
+            <label>Reference pressure<span class="input-row"><input id="editor-reference-pressure" type="number" min="0" step="0.01" value="300" required /><span class="field-unit pressure-unit-label">kPa</span></span></label>
+            <label>Reference flow<span class="input-row"><input id="editor-reference-flow" type="number" min="0" step="0.01" value="550" required /><span class="field-unit flow-unit-label">cc/min</span></span></label>
+            <label>Source URL<input id="editor-url" type="url" placeholder="https://..." /></label>
+          </div>
+
+          <div id="editor-flow-curve">
+            <h3>Pressure × flow curve</h3>
+            <p>Enter pressure in the upper row and flow in the lower row. Add one column for each characterized point.</p>
+            <div id="editor-flow-table"></div>
+            <p><button id="editor-add-flow-point" type="button">Add flow point</button></p>
+          </div>
+
+          <h3>Dead-time table</h3>
+          <p>Enter the voltage bins, pressure bins, and dead-time values from the source characterization.</p>
+          <div id="editor-deadtime"></div>
+          <p><button id="editor-add-voltage" type="button">Add voltage bin</button><button id="editor-add-pressure" type="button">Add pressure bin</button></p>
+
+          <label>Notes<textarea id="editor-notes" rows="3" placeholder="Test fuel, driver, documentation revision, and limitations."></textarea></label>
+
+          <hr />
+          <div><div><p>2. Contribution</p><h2>Create the GitHub contribution</h2></div></div>
+          <p>The button opens GitHub with the JSON file pre-filled. Review the file, create a branch or fork if required, then open the pull request.</p>
+          <p><button type="submit">Create GitHub contribution</button></p>
+          <p id="editor-message" aria-live="polite"></p>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const form = document.querySelector("#editor-form");
+        const grid = document.querySelector("#editor-deadtime");
+        const pressureControl = document.querySelector("#pressure-unit");
+        const flowControl = document.querySelector("#flow-unit");
+        const referencePressure = document.querySelector("#editor-reference-pressure");
+        const referenceFlow = document.querySelector("#editor-reference-flow");
+        const flowMode = document.querySelector("#editor-flow-mode");
+        const flowCurveSection = document.querySelector("#editor-flow-curve");
+        const flowGrid = document.querySelector("#editor-flow-table");
+        const pressureFactors = { kPa: 1, bar: 100, psi: 6.894757 };
+        const flowCcMinPerUnit = { "cc/min": 1, "lb/h": 453.59237 / (0.72 * 60), "g/s": 60 / 0.72 };
+        let units = { pressure: "kPa", flow: "cc/min" };
+        let reference = { pressureKpa: 300, flowCcMin: 550 };
+        let curvePoints = [{ pressureKpa: 250, flowCcMin: 502 }, { pressureKpa: 300, flowCcMin: 550 }];
+        let deadTime = {
+          voltageBins: [8, 10, 12, 14, 16],
+          pressureBinsKpa: [250, 300],
+          valuesMs: [[1.70, 1.10, 0.75, 0.55, 0.40], [1.80, 1.15, 0.80, 0.58, 0.43]]
+        };
+        const number = (value) => Number.parseFloat(value);
+        const fixed = (value) => Number(value).toFixed(2);
+        const pressure = (kPa) => kPa / pressureFactors[units.pressure];
+        const pressureKpa = (value) => value * pressureFactors[units.pressure];
+        const flow = (ccMin) => ccMin / flowCcMinPerUnit[units.flow];
+        const flowCcMin = (value) => value * flowCcMinPerUnit[units.flow];
+        const input = (value, attributes) => `<input type="number" step="0.01" value="${fixed(value)}" ${attributes}>`;
+        const heatColor = (value, values) => {
+          const low = Math.min(...values); const high = Math.max(...values);
+          return `hsl(${120 - ((value - low) / (high - low || 1)) * 120} 70% 88%)`;
+        };
+        const syncLabels = () => {
+          pressureControl.value = units.pressure; flowControl.value = units.flow;
+          document.querySelectorAll(".pressure-unit-label").forEach((element) => { element.textContent = units.pressure; });
+          document.querySelectorAll(".flow-unit-label").forEach((element) => { element.textContent = units.flow; });
+          document.querySelector("#unit-note").textContent = units.flow === "cc/min" ? "Profiles are always saved in kPa and cc/min." : "Mass-flow display uses gasoline density of 0.72 g/ml. Profiles are always saved in kPa and cc/min.";
+        };
+        const syncReference = () => {
+          referencePressure.value = fixed(pressure(reference.pressureKpa));
+          referenceFlow.value = fixed(flow(reference.flowCcMin));
+        };
+        const readReference = () => {
+          reference = { pressureKpa: pressureKpa(number(referencePressure.value)), flowCcMin: flowCcMin(number(referenceFlow.value)) };
+        };
+        const renderFlowCurve = () => {
+          flowCurveSection.hidden = flowMode.value !== "curve";
+          flowGrid.innerHTML = `<table class="flow-curve-table"><tbody><tr><th>Pressure (${units.pressure})</th>${curvePoints.map((point, column) => `<td>${input(pressure(point.pressureKpa), `data-flow-kind="pressure" data-column="${column}"`)}</td>`).join("")}</tr><tr><th>Flow (${units.flow})</th>${curvePoints.map((point, column) => `<td>${input(flow(point.flowCcMin), `data-flow-kind="flow" data-column="${column}"`)}</td>`).join("")}</tr></tbody></table>`;
+        };
+        const readCurve = () => {
+          curvePoints = curvePoints.map((point, column) => {
+            const pressureInput = flowGrid.querySelector(`[data-flow-kind="pressure"][data-column="${column}"]`);
+            const flowInput = flowGrid.querySelector(`[data-flow-kind="flow"][data-column="${column}"]`);
+            return pressureInput && flowInput
+              ? { pressureKpa: pressureKpa(number(pressureInput.value)), flowCcMin: flowCcMin(number(flowInput.value)) }
+              : point;
+          });
+        };
+        const editFlowCurve = (event) => {
+          const target = event.target; const kind = target.dataset.flowKind;
+          if (!kind) return;
+          const column = Number(target.dataset.column);
+          if (kind === "pressure") curvePoints[column].pressureKpa = pressureKpa(number(target.value));
+          if (kind === "flow") curvePoints[column].flowCcMin = flowCcMin(number(target.value));
+        };
+        const addFlowPoint = () => {
+          readCurve();
+          const last = curvePoints.at(-1);
+          const previous = curvePoints.at(-2);
+          const pressureStep = previous ? Math.max(1, last.pressureKpa - previous.pressureKpa) : 50;
+          const nextPressure = last.pressureKpa + pressureStep;
+          curvePoints.push({ pressureKpa: nextPressure, flowCcMin: last.flowCcMin * Math.sqrt(nextPressure / last.pressureKpa) });
+          renderFlowCurve();
+        };
+        const renderDeadTime = () => {
+          const values = deadTime.valuesMs.flat();
+          grid.innerHTML = `<table><thead><tr><th>Pressure (${units.pressure}) / voltage</th>${deadTime.voltageBins.map((value, column) => `<th>${input(value, `data-kind="voltage" data-column="${column}"`)}</th>`).join("")}</tr></thead><tbody>${deadTime.pressureBinsKpa.map((value, row) => `<tr><th>${input(pressure(value), `data-kind="pressure" data-row="${row}"`)}</th>${deadTime.valuesMs[row].map((cell, column) => `<td style="background:${heatColor(cell, values)}">${input(cell, `data-kind="cell" data-row="${row}" data-column="${column}"`)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+        };
+        const editDeadTime = (event) => {
+          const target = event.target; const kind = target.dataset.kind;
+          if (!kind) return;
+          const row = Number(target.dataset.row); const column = Number(target.dataset.column);
+          if (kind === "voltage") deadTime.voltageBins[column] = number(target.value);
+          if (kind === "pressure") deadTime.pressureBinsKpa[row] = pressureKpa(number(target.value));
+          if (kind === "cell") { deadTime.valuesMs[row][column] = number(target.value); renderDeadTime(); }
+        };
+        const addAxis = (kind) => {
+          if (kind === "voltage") {
+            deadTime.voltageBins.push(deadTime.voltageBins.at(-1) + 1);
+            deadTime.valuesMs.forEach((row) => row.push(row.at(-1)));
+          } else {
+            deadTime.pressureBinsKpa.push(deadTime.pressureBinsKpa.at(-1) + 50);
+            deadTime.valuesMs.push([...deadTime.valuesMs.at(-1)]);
+          }
+          renderDeadTime();
+        };
+        const changeUnits = () => {
+          readReference();
+          readCurve();
+          units = { pressure: pressureControl.value, flow: flowControl.value };
+          syncLabels(); syncReference();
+          renderFlowCurve();
+          renderDeadTime();
+        };
+        const buildProfile = () => {
+          readReference();
+          const model = { kind: flowMode.value === "curve" ? "curve" : "sqrtFromReference" };
+          if (model.kind === "curve") {
+            readCurve();
+            if (curvePoints.length < 2) throw new Error("A pressure/flow curve needs at least two points.");
+            if (curvePoints.some((point) => !(point.pressureKpa > 0) || !(point.flowCcMin > 0))) throw new Error("Every curve point needs positive pressure and flow values.");
+            const pressures = curvePoints.map((point) => point.pressureKpa);
+            if (new Set(pressures).size !== pressures.length) throw new Error("Curve pressure values must be unique.");
+            model.points = [...curvePoints].sort((left, right) => left.pressureKpa - right.pressureKpa);
+          }
+          const profile = {
+            schemaVersion: 1,
+            id: document.querySelector("#editor-id").value.trim(),
+            name: document.querySelector("#editor-name").value.trim(),
+            partNumber: document.querySelector("#editor-part").value.trim() || "Unknown",
+            source: { kind: document.querySelector("#editor-source").value, url: document.querySelector("#editor-url").value.trim(), notes: document.querySelector("#editor-notes").value.trim() },
+            reference, flowModel: model, deadTime
+          };
+          if (!profile.id || !profile.name || !(reference.pressureKpa > 0) || !(reference.flowCcMin > 0)) throw new Error("Profile needs an id, name, positive reference pressure, and positive reference flow.");
+          return profile;
+        };
+        grid.addEventListener("change", editDeadTime);
+        flowGrid.addEventListener("change", editFlowCurve);
+        document.querySelector("#editor-add-flow-point").addEventListener("click", addFlowPoint);
+        document.querySelector("#editor-add-voltage").addEventListener("click", () => addAxis("voltage"));
+        document.querySelector("#editor-add-pressure").addEventListener("click", () => addAxis("pressure"));
+        pressureControl.addEventListener("change", changeUnits);
+        flowControl.addEventListener("change", changeUnits);
+        flowMode.addEventListener("change", renderFlowCurve);
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          try {
+            const profile = buildProfile();
+            const path = `injectors/${profile.id}.json`;
+            window.open(`https://github.com/Matheusschmitz/injector-preset-web/new/master?filename=${encodeURIComponent(path)}&value=${encodeURIComponent(JSON.stringify(profile, null, 2))}`, "_blank", "noopener");
+            document.querySelector("#editor-message").textContent = "GitHub opened with JSON stored in kPa and cc/min. Review it, then create the pull request.";
+          } catch (error) {
+            document.querySelector("#editor-message").textContent = error.message;
+          }
+        });
+        // Theme toggle removed
+
+        syncLabels(); syncReference(); renderFlowCurve(); renderDeadTime();
+      })();
+    </script>
+  </body>
+</html>

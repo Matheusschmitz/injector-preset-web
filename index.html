@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Injector Preset Catalog</title>
+    <link rel="stylesheet" href="styles.css?v=2" />
+  </head>
+  <body>
+    <header class="global-header">
+      <div class="header-container">
+        <nav class="site-nav" aria-label="Main navigation">
+          <a href="index.html" class="nav-link" aria-current="page">Catalog</a>
+          <a href="add-injector.html" class="nav-link">Add Injector</a>
+          <a href="https://github.com/Matheusschmitz/injector-preset-web" target="_blank" rel="noopener" class="nav-link">GitHub</a>
+        </nav>
+        <div class="header-banner">
+          Want to help? <a href="add-injector.html">Contribute new injector presets!</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <header>
+        <h1>Injector preset catalog</h1>
+        <div class="unit-selectors">
+          <label>Pressure unit<select id="pressure-unit"><option value="kPa">kPa</option><option value="bar">bar</option><option value="psi">psi</option></select></label>
+          <label>Flow unit<select id="flow-unit"><option value="cc/min">cc/min</option><option value="lb/h">lb/h</option><option value="g/s">g/s</option></select></label>
+        </div>
+        <p id="unit-note" class="unit-note"></p>
+        <p>Select a characterized injector, enter the fuel pressure used by your engine, and generate an injector-only <code>.msq</code> for TunerStudio.</p>
+        <p>Presets should be based on manufacturer documentation. Verify every result on the vehicle with a safe tune and appropriate instrumentation.</p>
+      </header>
+
+      <hr />
+      <section aria-labelledby="configure-title">
+        <div>
+          <div>
+            <p>1. Configure</p>
+            <h2 id="configure-title">Choose the injector and pressures</h2>
+          </div>
+          <span id="profile-status">Loading profiles…</span>
+        </div>
+
+        <div>
+          <label>
+            Injector profile
+            <select id="injector-select">
+              <option value="">Loading profiles…</option>
+            </select>
+          </label>
+          <label>Injector operating/reference pressure<span class="input-row"><span class="input-with-range"><input id="reference-pressure" type="number" step="0.01" value="300" aria-describedby="reference-pressure-range" /><span id="reference-pressure-range" class="range-hint"></span></span><span class="field-unit pressure-unit-label">kPa</span></span></label>
+          <label>Dead-time table minimum pressure<span class="input-row"><span class="input-with-range"><input id="minimum-pressure" type="number" step="0.01" value="250" aria-describedby="minimum-pressure-range" /><span id="minimum-pressure-range" class="range-hint"></span></span><span class="field-unit pressure-unit-label">kPa</span></span></label>
+          <label>Dead-time table maximum pressure<span class="input-row"><span class="input-with-range"><input id="maximum-pressure" type="number" step="0.01" value="500" aria-describedby="maximum-pressure-range" /><span id="maximum-pressure-range" class="range-hint"></span></span><span class="field-unit pressure-unit-label">kPa</span></span></label>
+        </div>
+
+        <p id="profile-description"></p>
+        <p id="result-summary" aria-live="polite"></p>
+
+        <h3>Pressure × flow</h3>
+        <p id="flow-model-description">Reference data from the selected injector profile.</p>
+        <table id="flow-table">
+          <caption>Pressure versus flow</caption>
+          <thead><tr><th>Pressure (<span class="pressure-unit-label">kPa</span>)</th><th>Flow (<span class="flow-unit-label">cc/min</span>)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <svg id="flow-chart" width="640" height="280" viewBox="0 0 640 280" role="img" aria-label="Pressure versus flow chart"></svg>
+
+        <h3>Characterized dead-time data</h3>
+        <p>Reference table used to interpolate the two rows exported to rusEFI.</p>
+        <table id="deadtime-table">
+          <caption>Dead time in milliseconds; pressure × battery voltage</caption>
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+
+        <h3>Generated rusEFI dead-time table</h3>
+        <p>The two rows below are interpolated from the complete source table at the selected minimum and maximum dead-time table pressures.</p>
+        <table id="generated-deadtime-table">
+          <caption>Two-row dead-time table exported to rusEFI</caption>
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <hr />
+      <section aria-labelledby="export-title">
+        <div><div><p>2. Export</p><h2 id="export-title">Generate an injector-only <code>.msq</code></h2></div></div>
+        <ul>
+          <li><code>injector_flow</code> (cc/min)</li>
+          <li><code>injectorFlowAsMassFlow</code> (cc/min mode)</li>
+          <li><code>fuelReferencePressure</code> (pressure at which <code>injector_flow</code> is specified, kPa)</li>
+          <li>Primary injector voltage axis (8 bins), pressure axis (2 bins), and 2×8 dead-time table</li>
+        </ul>
+        <p><button id="download-msq" type="button">Generate injector-only .msq</button></p>
+        <p id="export-message" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const profiles = {};
+        const select = document.querySelector("#injector-select");
+        const referencePressure = document.querySelector("#reference-pressure");
+        const minimum = document.querySelector("#minimum-pressure");
+        const maximum = document.querySelector("#maximum-pressure");
+        const pressureControl = document.querySelector("#pressure-unit");
+        const flowControl = document.querySelector("#flow-unit");
+        const pressureFactors = { kPa: 1, bar: 100, psi: 6.894757 };
+        const flowCcMinPerUnit = { "cc/min": 1, "lb/h": 453.59237 / (0.72 * 60), "g/s": 60 / 0.72 };
+        let units = { pressure: pressureControl.value, flow: flowControl.value };
+        const fixed = (value, digits = 2) => Number(value).toFixed(digits);
+        const pressure = (kPa) => kPa / pressureFactors[units.pressure];
+        const flow = (ccMin) => ccMin / flowCcMinPerUnit[units.flow];
+        const range = () => ({ min: Number(minimum.value) * pressureFactors[units.pressure], max: Number(maximum.value) * pressureFactors[units.pressure] });
+        const referencePressureKpa = () => Number(referencePressure.value) * pressureFactors[units.pressure];
+        const setRange = (value) => { minimum.value = fixed(pressure(value.min)); maximum.value = fixed(pressure(value.max)); };
+        const setReferencePressure = (value) => { referencePressure.value = fixed(pressure(value)); };
+        const pressureBounds = (profile) => ({ min: profile.pressures[0], max: profile.pressures.at(-1) });
+        const updatePressureLimits = (profile) => {
+          const bounds = pressureBounds(profile);
+          const displayMin = fixed(pressure(bounds.min)); const displayMax = fixed(pressure(bounds.max));
+          const hint = `${displayMin}–${displayMax}`;
+          [referencePressure, minimum, maximum].forEach((input) => {
+            input.min = displayMin; input.max = displayMax;
+            input.title = `Allowed range: ${hint} ${units.pressure}`;
+          });
+          document.querySelector("#reference-pressure-range").textContent = hint;
+          document.querySelector("#minimum-pressure-range").textContent = hint;
+          document.querySelector("#maximum-pressure-range").textContent = hint;
+        };
+        const normalizeReferencePressure = (profile) => {
+          const bounds = pressureBounds(profile);
+          setReferencePressure(Math.min(bounds.max, Math.max(bounds.min, referencePressureKpa())));
+        };
+        const normalizeDeadTimeRange = (profile) => {
+          const bounds = pressureBounds(profile); let { min, max } = range();
+          min = Math.min(bounds.max, Math.max(bounds.min, min));
+          max = Math.min(bounds.max, Math.max(bounds.min, max));
+          if (min > max) [min, max] = [max, min];
+          setRange({ min, max });
+        };
+        const syncUnits = () => {
+          pressureControl.value = units.pressure; flowControl.value = units.flow;
+          document.querySelectorAll(".pressure-unit-label").forEach((element) => { element.textContent = units.pressure; });
+          document.querySelectorAll(".flow-unit-label").forEach((element) => { element.textContent = units.flow; });
+          document.querySelector("#unit-note").textContent = units.flow === "cc/min" ? "Display units do not change saved data or MSQ export." : "Mass-flow display uses gasoline density of 0.72 g/ml. Saved profiles and MSQ export always use kPa and cc/min.";
+        };
+        const interpolate = (points, pressure) => {
+          let low = points[0]; let high = points[1];
+          for (let index = 1; index < points.length; index += 1) {
+            low = points[index - 1]; high = points[index];
+            if (pressure <= high[0]) break;
+          }
+          return low[1] + ((pressure - low[0]) / (high[0] - low[0])) * (high[1] - low[1]);
+        };
+        const flowAtPressure = (profile, pressureValue) => profile.flowModel === "sqrtFromReference"
+          ? profile.reference[1] * Math.sqrt(pressureValue / profile.reference[0])
+          : interpolate(profile.flow, pressureValue);
+        const flowDisplayPoints = (profile) => {
+          if (profile.flowModel !== "sqrtFromReference") return profile.flow;
+          const maxPressure = profile.flow.at(-1)[0];
+          const pressures = [0, maxPressure * 0.25, maxPressure * 0.5, maxPressure * 0.75, maxPressure, profile.reference[0]];
+          return [...new Set(pressures)].sort((left, right) => left - right).map((pressureValue) => [pressureValue, flowAtPressure(profile, pressureValue)]);
+        };
+        const deadRow = (profile, pressure) => profile.volts.map((_, column) => interpolate(profile.pressures.map((value, row) => [value, profile.dead[row][column]]), pressure));
+        const exportVoltageBins = (profile) => {
+          if (profile.volts.length === 8) return [...profile.volts];
+          if (profile.volts.length > 8) return Array.from({ length: 8 }, (_, index) => profile.volts[Math.floor(index * (profile.volts.length - 1) / 7)]);
+          const low = profile.volts[0]; const high = profile.volts.at(-1);
+          return Array.from({ length: 8 }, (_, index) => low + index * (high - low) / 7);
+        };
+        const deadValues = (profile, pressureValue, voltageBins = profile.volts) => {
+          const sourceRow = deadRow(profile, pressureValue);
+          const voltageCurve = profile.volts.map((voltage, index) => [voltage, sourceRow[index]]);
+          return voltageBins.map((voltage) => interpolate(voltageCurve, voltage));
+        };
+        const renderTable = (head, body, profile, pressures, voltageBins = profile.volts) => {
+          const values = profile.dead.flat();
+          const low = Math.min(...values); const high = Math.max(...values);
+          const color = (value) => `hsl(${120 - ((value - low) / (high - low || 1)) * 120} 70% 88%)`;
+          head.innerHTML = `<tr><th>Pressure (${units.pressure}) / voltage</th>${voltageBins.map((value) => `<th>${fixed(value, 1)} V</th>`).join("")}</tr>`;
+          body.innerHTML = pressures.map((value) => `<tr><th>${fixed(pressure(value))} ${units.pressure}</th>${deadValues(profile, value, voltageBins).map((cell) => `<td style="background:${color(cell)}">${fixed(cell)}</td>`).join("")}</tr>`).join("");
+        };
+        const renderChart = (profile) => {
+          const chart = document.querySelector("#flow-chart");
+          const points = flowDisplayPoints(profile);
+          const width = 640; const height = 280;
+          const padding = { top: 20, right: 25, bottom: 45, left: 60 };
+          const minX = points[0][0]; const maxX = points.at(-1)[0];
+          const linePoints = profile.flowModel === "sqrtFromReference"
+            ? Array.from({ length: 65 }, (_, index) => {
+                const pressureValue = minX + index * (maxX - minX) / 64;
+                return [pressureValue, flowAtPressure(profile, pressureValue)];
+              })
+            : points;
+          const minY = Math.min(...linePoints.map((point) => point[1])); const maxY = Math.max(...linePoints.map((point) => point[1]));
+          const x = (value) => padding.left + ((value - minX) / (maxX - minX || 1)) * (width - padding.left - padding.right);
+          const y = (value) => height - padding.bottom - ((value - minY) / (maxY - minY || 1)) * (height - padding.top - padding.bottom);
+          const line = linePoints.map((point) => `${x(point[0])},${y(point[1])}`).join(" ");
+          const xTicks = points.map((point) => `<line x1="${x(point[0])}" y1="${height - padding.bottom}" x2="${x(point[0])}" y2="${height - padding.bottom + 5}" stroke="black" /><text x="${x(point[0])}" y="${height - padding.bottom + 18}" text-anchor="middle">${fixed(pressure(point[0]), 0)}</text>`).join("");
+          const yTicks = points.map((point) => `<line x1="${padding.left - 5}" y1="${y(point[1])}" x2="${padding.left}" y2="${y(point[1])}" stroke="black" /><text x="${padding.left - 8}" y="${y(point[1]) + 4}" text-anchor="end">${fixed(flow(point[1]), 0)}</text>`).join("");
+          const markers = points.map((point) => `<circle cx="${x(point[0])}" cy="${y(point[1])}" r="4" fill="#d83b01"><title>${fixed(pressure(point[0]))} ${units.pressure} / ${fixed(flow(point[1]))} ${units.flow}</title></circle><text x="${x(point[0])}" y="${y(point[1]) - 9}" text-anchor="middle">${fixed(flow(point[1]), 0)}</text>`).join("");
+          chart.innerHTML = `<line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" stroke="black" /><line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${height - padding.bottom}" stroke="black" />${xTicks}${yTicks}<polyline points="${line}" fill="none" stroke="#0563c1" stroke-width="3" />${markers}<text x="${width / 2}" y="${height - 4}" text-anchor="middle">Pressure (${units.pressure})</text><text x="16" y="${height / 2}" text-anchor="middle" transform="rotate(-90 16 ${height / 2})">Flow (${units.flow})</text>`;
+        };
+        const render = () => {
+          const profile = profiles[select.value];
+          if (!profile) return;
+          const { min, max } = range();
+          const referenceKpa = referencePressureKpa();
+          updatePressureLimits(profile);
+          document.querySelector("#profile-status").textContent = "";
+          document.querySelector("#profile-description").innerHTML = profile.notes
+            ? `<strong>${profile.partNumber}</strong> · ${profile.notes}`
+            : `<strong>${profile.partNumber}</strong>`;
+          document.querySelector("#result-summary").textContent = `${fixed(flow(flowAtPressure(profile, referenceKpa)))} ${units.flow} at ${fixed(pressure(referenceKpa), 0)} ${units.pressure} reference pressure.`;
+          document.querySelector("#flow-model-description").textContent = profile.flowModel === "sqrtFromReference"
+            ? "Calculated curve using flow = reference flow × √(pressure / reference pressure). The graph starts at zero to make the proportional relationship visible; orange dots are calculated values, not additional measured data."
+            : "Measured or characterized points from the selected injector profile; the line follows the supplied data.";
+          document.querySelector("#flow-table caption").textContent = profile.flowModel === "sqrtFromReference" ? "Calculated pressure versus flow" : "Pressure versus flow";
+          document.querySelector("#flow-table tbody").innerHTML = flowDisplayPoints(profile).map((point) => `<tr><td>${fixed(pressure(point[0]))}</td><td>${fixed(flow(point[1]))}</td></tr>`).join("");
+          renderChart(profile);
+          renderTable(document.querySelector("#deadtime-table thead"), document.querySelector("#deadtime-table tbody"), profile, profile.pressures);
+          renderTable(document.querySelector("#generated-deadtime-table thead"), document.querySelector("#generated-deadtime-table tbody"), profile, [min, max], exportVoltageBins(profile));
+        };
+        const loadCatalog = async () => {
+          if (window.location.protocol === "file:") return;
+          try {
+            const files = await (await fetch("injectors/index.json", { cache: "no-store" })).json();
+            const documents = await Promise.all(files.map(async (file) => (await fetch(`injectors/${file}`, { cache: "no-store" })).json()));
+            documents.forEach((document) => {
+              const reference = document.reference;
+              const profileFlow = document.flowModel.kind === "curve"
+                ? document.flowModel.points.map((point) => [point.pressureKpa, point.flowCcMin])
+                : [[reference.pressureKpa, reference.flowCcMin], [reference.pressureKpa * 4 / 3, reference.flowCcMin * Math.sqrt(4 / 3)]];
+              profiles[document.id] = {
+                name: document.name, partNumber: document.partNumber, notes: document.source?.notes || "",
+                flowModel: document.flowModel.kind,
+                reference: [reference.pressureKpa, reference.flowCcMin],
+                flow: profileFlow, volts: document.deadTime.voltageBins,
+                pressures: document.deadTime.pressureBinsKpa, dead: document.deadTime.valuesMs
+              };
+            });
+            select.innerHTML = Object.entries(profiles).map(([id, profile]) => `<option value="${id}">${profile.name}</option>`).join("");
+            const firstProfile = profiles[select.value];
+            if (firstProfile) {
+              setReferencePressure(firstProfile.reference[0]);
+              setRange({ min: firstProfile.pressures[0], max: firstProfile.pressures.at(-1) });
+            }
+            render();
+          } catch (error) {
+            document.querySelector("#profile-status").textContent = `Built-in catalog (${error.message})`;
+          }
+        };
+        const valuesText = (values) => `\n${values.map((value) => `         ${fixed(value, 4)}`).join("\n")}\n      `;
+        const matrixText = (rows) => `\n${rows.map((row) => `         ${row.map((value) => fixed(value, 4)).join(" ")}`).join("\n")}\n      `;
+        const constant = (name, value, attributes = "") => `<constant ${attributes} name="${name}">${value}</constant>`;
+        const generateMsq = () => {
+          const profile = profiles[select.value];
+          if (!profile) return;
+          normalizeReferencePressure(profile);
+          normalizeDeadTimeRange(profile);
+          const { min, max } = range();
+          const referenceKpa = referencePressureKpa();
+          const voltageBins = exportVoltageBins(profile);
+          const rows = [deadValues(profile, min, voltageBins), deadValues(profile, max, voltageBins)];
+          const constants = [
+            constant("injector_flow", fixed(flowAtPressure(profile, referenceKpa), 4), 'digits="2" units=""'),
+            constant("injectorFlowAsMassFlow", '"cc/min"'),
+            constant("fuelReferencePressure", fixed(referenceKpa, 1), 'digits="0" units="kPa"'),
+            constant("injector_battLagCorrBattBins", valuesText(voltageBins), 'cols="1" digits="2" rows="8" units="volts"'),
+            constant("injector_battLagCorrPressBins", valuesText([min, max]), 'cols="1" rows="2" units="kPa"'),
+            constant("injector_battLagCorrTable", matrixText(rows), 'cols="8" digits="2" rows="2" units="ms"')
+          ];
+          const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<msq xmlns="http://www.msefi.com/:msq">\n  <versionInfo fileFormat="5.0" firmwareInfo="rusEFI injector preset" nPages="1" signature="injector-preset"/>\n  <page number="0">\n    ${constants.join("\n    ")}\n  </page>\n</msq>\n`;
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(new Blob([xml], { type: "application/xml" }));
+          link.download = `${select.value}-ref${Math.round(referenceKpa)}kpa-${Math.round(min)}-${Math.round(max)}kpa-rusefi-2x8.msq`;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(link.href), 0);
+          document.querySelector("#export-message").textContent = "2×8 MSQ downloaded in kPa and cc/min.";
+        };
+        select.addEventListener("change", () => {
+          const profile = profiles[select.value];
+          if (!profile) return;
+          setReferencePressure(profile.reference[0]);
+          setRange({ min: profile.pressures[0], max: profile.pressures.at(-1) });
+          render();
+        });
+        referencePressure.addEventListener("input", render);
+        minimum.addEventListener("input", render);
+        maximum.addEventListener("input", render);
+        const normalizeAndRender = () => {
+          const profile = profiles[select.value];
+          if (!profile) return;
+          normalizeDeadTimeRange(profile);
+          render();
+        };
+        const normalizeReferenceAndRender = () => {
+          const profile = profiles[select.value];
+          if (!profile) return;
+          normalizeReferencePressure(profile);
+          render();
+        };
+        referencePressure.addEventListener("change", normalizeReferenceAndRender);
+        referencePressure.addEventListener("blur", normalizeReferenceAndRender);
+        minimum.addEventListener("change", normalizeAndRender);
+        maximum.addEventListener("change", normalizeAndRender);
+        minimum.addEventListener("blur", normalizeAndRender);
+        maximum.addEventListener("blur", normalizeAndRender);
+        pressureControl.addEventListener("change", () => { const currentRange = range(); const currentReference = referencePressureKpa(); units.pressure = pressureControl.value; syncUnits(); setReferencePressure(currentReference); setRange(currentRange); render(); });
+        flowControl.addEventListener("change", () => { units.flow = flowControl.value; syncUnits(); render(); });
+        document.querySelector("#download-msq").addEventListener("click", generateMsq);
+
+        // Theme toggle removed
+
+        syncUnits();
+        render();
+        loadCatalog();
+      })();
+    </script>
+  </body>
+</html>

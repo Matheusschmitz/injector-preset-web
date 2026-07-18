@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "bosch-0280158209-community",
+  "name": "Bosch 0 280 158 209 — 830 cc/min at 3 bar",
+  "partNumber": "Bosch 0 280 158 209",
+  "source": {
+    "kind": "community",
+    "url": "",
+    "notes": ""
+  },
+  "reference": {
+    "pressureKpa": 300,
+    "flowCcMin": 830
+  },
+  "flowModel": {
+    "kind": "curve",
+    "points": [
+      { "pressureKpa": 250, "flowCcMin": 756 },
+      { "pressureKpa": 300, "flowCcMin": 830 },
+      { "pressureKpa": 350, "flowCcMin": 893 },
+      { "pressureKpa": 400, "flowCcMin": 956 },
+      { "pressureKpa": 450, "flowCcMin": 1019 },
+      { "pressureKpa": 500, "flowCcMin": 1071 }
+    ]
+  },
+  "deadTime": {
+    "voltageBins": [8, 9, 10, 11, 12, 13, 14, 15, 16],
+    "pressureBinsKpa": [250, 300, 350, 400, 450, 500],
+    "valuesMs": [
+      [3.18, 2.27, 1.82, 1.53, 1.31, 1.12, 1.01, 0.88, 0.75],
+      [3.49, 2.40, 1.90, 1.58, 1.36, 1.16, 1.04, 0.91, 0.77],
+      [3.81, 2.54, 1.97, 1.64, 1.40, 1.19, 1.07, 0.94, 0.79],
+      [4.12, 2.67, 2.05, 1.70, 1.45, 1.23, 1.10, 0.96, 0.81],
+      [4.43, 2.81, 2.13, 1.75, 1.50, 1.26, 1.13, 0.99, 0.83],
+      [4.74, 2.94, 2.20, 1.81, 1.55, 1.30, 1.17, 1.02, 0.85]
+    ]
+  }
+}

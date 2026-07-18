@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "bosch-0280157184-community",
+  "name": "Bosch 0 280 157 184 — 1176 cc/min at 3 bar",
+  "partNumber": "Bosch 0 280 157 184",
+  "source": {
+    "kind": "community",
+    "url": "",
+    "notes": ""
+  },
+  "reference": {
+    "pressureKpa": 300,
+    "flowCcMin": 1176
+  },
+  "flowModel": {
+    "kind": "curve",
+    "points": [
+      { "pressureKpa": 250, "flowCcMin": 1071 },
+      { "pressureKpa": 300, "flowCcMin": 1176 },
+      { "pressureKpa": 350, "flowCcMin": 1270 },
+      { "pressureKpa": 400, "flowCcMin": 1354 },
+      { "pressureKpa": 450, "flowCcMin": 1438 },
+      { "pressureKpa": 500, "flowCcMin": 1522 }
+    ]
+  },
+  "deadTime": {
+    "voltageBins": [11, 12, 13, 14, 15, 16],
+    "pressureBinsKpa": [250, 300, 350, 400, 450, 500],
+    "valuesMs": [
+      [1.78, 1.58, 1.41, 1.27, 1.17, 1.08],
+      [1.83, 1.61, 1.44, 1.30, 1.18, 1.09],
+      [1.89, 1.64, 1.47, 1.32, 1.19, 1.10],
+      [1.95, 1.68, 1.50, 1.35, 1.20, 1.11],
+      [2.03, 1.72, 1.54, 1.37, 1.22, 1.11],
+      [2.12, 1.77, 1.58, 1.40, 1.24, 1.12]
+    ]
+  }
+}
